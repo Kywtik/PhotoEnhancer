@@ -15,11 +15,18 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Android SDK Manually
+        run: |
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
+          unzip -q tools.zip -d $HOME/android-sdk/cmdline-tools
+          mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          rm tools.zip
+          echo "y" | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/android-sdk "platforms;android-34" "build-tools;34.0.0"
 
       - name: Generate Android Project
         run: |
+          export ANDROID_HOME=$HOME/android-sdk
           mkdir -p app/src/main/java/com/polza/enhancer
           mkdir -p app/src/main/res/values
 
@@ -667,7 +674,9 @@ jobs:
           gradle-version: '8.5'
 
       - name: Assemble Debug APK
-        run: gradle assembleDebug
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
