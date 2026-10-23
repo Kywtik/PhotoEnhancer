@@ -17,8 +17,6 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: "11076708_latest"
 
       - name: Generate Android Project
         run: |
@@ -592,7 +590,7 @@ jobs:
                   if (jsonBody != null) {
                       conn.setDoOutput(true);
                       try (OutputStream os = conn.getOutputStream()) {
-                        os.write(jsonBody.getBytes("UTF-8"));
+                          os.write(jsonBody.getBytes("UTF-8"));
                       }
                   }
                   int code = conn.getResponseCode();
