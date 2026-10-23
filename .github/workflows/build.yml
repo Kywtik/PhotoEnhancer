@@ -1,0 +1,676 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Android Project
+        run: |
+          mkdir -p app/src/main/java/com/polza/enhancer
+          mkdir -p app/src/main/res/values
+
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "PolzaEnhancer"
+          include ':app'
+          EOF
+
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.2.0' apply false
+          }
+          EOF
+
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
+
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.polza.enhancer'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.polza.enhancer"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          dependencies {
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+              <application
+                  android:label="AI Photo Enhancer"
+                  android:theme="@android:style/Theme.DeviceDefault"
+                  android:requestLegacyExternalStorage="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".EnhancerService"
+                      android:enabled="true"
+                      android:exported="false"
+                      android:foregroundServiceType="dataSync" />
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/polza/enhancer/MainActivity.java
+          package com.polza.enhancer;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.os.PowerManager;
+          import android.provider.Settings;
+          import android.text.InputType;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          public class MainActivity extends Activity {
+              private EditText keyInput, modelInput, promptInput;
+              private Button toggleBtn;
+              private TextView logView, statusText;
+              private SharedPreferences prefs;
+
+              private final BroadcastReceiver logReceiver = new BroadcastReceiver() {
+                  @Override
+                  public void onReceive(Context context, Intent intent) {
+                      updateUI();
+                  }
+              };
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  prefs = getSharedPreferences("polza_prefs", MODE_PRIVATE);
+
+                  ScrollView scroll = new ScrollView(this);
+                  scroll.setFillViewport(true);
+                  scroll.setBackgroundColor(Color.parseColor("#121212"));
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(48, 60, 48, 60);
+
+                  TextView title = new TextView(this);
+                  title.setText("AI Photo Enhancer");
+                  title.setTextSize(24);
+                  title.setTypeface(null, Typeface.BOLD);
+                  title.setTextColor(Color.WHITE);
+                  title.setPadding(0, 0, 0, 24);
+                  root.addView(title);
+
+                  statusText = new TextView(this);
+                  statusText.setTextSize(16);
+                  statusText.setPadding(0, 0, 0, 32);
+                  root.addView(statusText);
+
+                  root.addView(makeLabel("API Ключ (Polza.ai):"));
+                  keyInput = new EditText(this);
+                  keyInput.setHint("Вставьте ключ pza_...");
+                  keyInput.setHintTextColor(Color.GRAY);
+                  keyInput.setTextColor(Color.WHITE);
+                  keyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                  keyInput.setText(prefs.getString("api_key", ""));
+                  root.addView(keyInput);
+
+                  root.addView(makeLabel("ID Модели:"));
+                  modelInput = new EditText(this);
+                  modelInput.setTextColor(Color.WHITE);
+                  modelInput.setText(prefs.getString("model_id", "google/gemini-nano-banana-2.1"));
+                  root.addView(modelInput);
+
+                  root.addView(makeLabel("Промпт (инструкция для ИИ):"));
+                  promptInput = new EditText(this);
+                  promptInput.setTextColor(Color.WHITE);
+                  promptInput.setText(prefs.getString("prompt", "Enhance this photo: improve sharpness, fine detail, lighting and color, reduce noise. Keep the composition, objects, faces and any text exactly the same."));
+                  root.addView(promptInput);
+
+                  Button saveBtn = new Button(this);
+                  saveBtn.setText("💾 Сохранить настройки");
+                  saveBtn.setOnClickListener(v -> {
+                      savePrefs();
+                      Toast.makeText(this, "Настройки сохранены!", Toast.LENGTH_SHORT).show();
+                  });
+                  LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  btnParams.setMargins(0, 24, 0, 16);
+                  root.addView(saveBtn, btnParams);
+
+                  toggleBtn = new Button(this);
+                  toggleBtn.setTextSize(16);
+                  toggleBtn.setTypeface(null, Typeface.BOLD);
+                  toggleBtn.setOnClickListener(v -> toggleService());
+                  root.addView(toggleBtn, btnParams);
+
+                  Button permBtn = new Button(this);
+                  permBtn.setText("⚙️ Выдать разрешения (Память и Фон)");
+                  permBtn.setOnClickListener(v -> requestPerms());
+                  root.addView(permBtn, btnParams);
+
+                  root.addView(makeLabel("Журнал работы:"));
+                  logView = new TextView(this);
+                  logView.setTextColor(Color.parseColor("#00E676"));
+                  logView.setBackgroundColor(Color.parseColor("#1E1E1E"));
+                  logView.setPadding(24, 24, 24, 24);
+                  logView.setTextSize(13);
+                  logView.setTypeface(Typeface.MONOSPACE);
+                  root.addView(logView);
+
+                  scroll.addView(root);
+                  setContentView(scroll);
+
+                  requestPerms();
+                  updateUI();
+              }
+
+              private TextView makeLabel(String text) {
+                  TextView tv = new TextView(this);
+                  tv.setText(text);
+                  tv.setTextColor(Color.LTGRAY);
+                  tv.setTextSize(14);
+                  tv.setPadding(0, 20, 0, 4);
+                  return tv;
+              }
+
+              private void savePrefs() {
+                  prefs.edit()
+                      .putString("api_key", keyInput.getText().toString().trim())
+                      .putString("model_id", modelInput.getText().toString().trim())
+                      .putString("prompt", promptInput.getText().toString().trim())
+                      .apply();
+              }
+
+              private void toggleService() {
+                  savePrefs();
+                  if (prefs.getString("api_key", "").isEmpty()) {
+                      Toast.makeText(this, "Сначала введите API ключ!", Toast.LENGTH_LONG).show();
+                      return;
+                  }
+                  boolean running = EnhancerService.isRunning;
+                  Intent intent = new Intent(this, EnhancerService.class);
+                  if (running) {
+                      stopService(intent);
+                  } else {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          startForegroundService(intent);
+                      } else {
+                          startService(intent);
+                      }
+                  }
+                  toggleBtn.postDelayed(this::updateUI, 300);
+              }
+
+              private void updateUI() {
+                  boolean running = EnhancerService.isRunning;
+                  if (running) {
+                      statusText.setText("🟢 Статус: РАБОТАЕТ (ждёт новые фото)");
+                      statusText.setTextColor(Color.parseColor("#00E676"));
+                      toggleBtn.setText("⏹ ВЫКЛЮЧИТЬ АВТО-УЛУЧШЕНИЕ");
+                      toggleBtn.setBackgroundColor(Color.parseColor("#D32F2F"));
+                      toggleBtn.setTextColor(Color.WHITE);
+                  } else {
+                      statusText.setText("🔴 Статус: ОСТАНОВЛЕНО");
+                      statusText.setTextColor(Color.parseColor("#FF5252"));
+                      toggleBtn.setText("▶️ ВКЛЮЧИТЬ АВТО-УЛУЧШЕНИЕ");
+                      toggleBtn.setBackgroundColor(Color.parseColor("#2E7D32"));
+                      toggleBtn.setTextColor(Color.WHITE);
+                  }
+                  logView.setText(prefs.getString("logs", "Лог пуст. Нажмите «Включить», затем сделайте фото на камеру."));
+              }
+
+              private void requestPerms() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                      if (!Environment.isExternalStorageManager()) {
+                          try {
+                              Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                              i.setData(Uri.parse("package:" + getPackageName()));
+                              startActivity(i);
+                          } catch (Exception e) {
+                              Intent i = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                              startActivity(i);
+                          }
+                      }
+                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      requestPermissions(new String[]{
+                          Manifest.permission.READ_MEDIA_IMAGES,
+                          Manifest.permission.POST_NOTIFICATIONS
+                      }, 101);
+                  } else {
+                      requestPermissions(new String[]{
+                          Manifest.permission.READ_EXTERNAL_STORAGE,
+                          Manifest.permission.WRITE_EXTERNAL_STORAGE
+                      }, 101);
+                  }
+                  PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                  if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                      try {
+                          Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                          i.setData(Uri.parse("package:" + getPackageName()));
+                          startActivity(i);
+                      } catch (Exception ignored) {}
+                  }
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(logReceiver, new IntentFilter("POLZA_LOG_UPDATE"), Context.RECEIVER_NOT_EXPORTED);
+                  } else {
+                      registerReceiver(logReceiver, new IntentFilter("POLZA_LOG_UPDATE"));
+                  }
+                  updateUI();
+              }
+
+              @Override
+              protected void onPause() {
+                  super.onPause();
+                  try { unregisterReceiver(logReceiver); } catch (Exception ignored) {}
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/polza/enhancer/EnhancerService.java
+          package com.polza.enhancer;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.graphics.Matrix;
+          import android.media.ExifInterface;
+          import android.media.MediaScannerConnection;
+          import android.os.Build;
+          import android.os.Environment;
+          import android.os.IBinder;
+          import android.os.PowerManager;
+          import android.util.Base64;
+
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.text.SimpleDateFormat;
+          import java.util.Arrays;
+          import java.util.Date;
+          import java.util.HashSet;
+          import java.util.Locale;
+          import java.util.Set;
+
+          public class EnhancerService extends Service {
+              public static boolean isRunning = false;
+              private Thread worker;
+              private PowerManager.WakeLock wakeLock;
+              private SharedPreferences prefs;
+              private static final String CHANNEL_ID = "polza_enhancer_channel";
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  prefs = getSharedPreferences("polza_prefs", MODE_PRIVATE);
+                  createChannel();
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  if (!isRunning) {
+                      isRunning = true;
+                      startForeground(1, buildNotif("Жду новые фото с камеры..."));
+                      PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                      if (pm != null) {
+                          wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Polza::WakeLock");
+                          wakeLock.acquire();
+                      }
+                      worker = new Thread(this::runLoop);
+                      worker.start();
+                      log("Служба запущена. Ожидание новых фото...");
+                  }
+                  return START_STICKY;
+              }
+
+              @Override
+              public void onDestroy() {
+                  isRunning = false;
+                  if (worker != null) worker.interrupt();
+                  if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+                  log("Служба остановлена.");
+                  sendBroadcast(new Intent("POLZA_LOG_UPDATE").setPackage(getPackageName()));
+                  super.onDestroy();
+              }
+
+              @Override
+              public IBinder onBind(Intent intent) { return null; }
+
+              private void runLoop() {
+                  File srcDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera");
+                  File dstDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Enhanced");
+                  if (!dstDir.exists()) dstDir.mkdirs();
+
+                  Set<String> done = new HashSet<>();
+                  File[] initial = srcDir.listFiles();
+                  if (initial != null) {
+                      for (File f : initial) done.add(f.getName());
+                  }
+
+                  while (isRunning && !Thread.currentThread().isInterrupted()) {
+                      try {
+                          File[] current = srcDir.listFiles();
+                          if (current != null) {
+                              Arrays.sort(current, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+                              for (File f : current) {
+                                  if (!isRunning) break;
+                                  String name = f.getName();
+                                  if (name.startsWith(".") || done.contains(name)) continue;
+                                  done.add(name);
+                                  String low = name.toLowerCase(Locale.ROOT);
+                                  if (!low.endsWith(".jpg") && !low.endsWith(".jpeg")) continue;
+
+                                  if (waitStable(f)) {
+                                      processFile(f, new File(dstDir, name));
+                                  }
+                              }
+                          }
+                          Thread.sleep(2000);
+                      } catch (InterruptedException e) {
+                          break;
+                      } catch (Exception e) {
+                          log("Ошибка цикла: " + e.getMessage());
+                      }
+                  }
+              }
+
+              private boolean waitStable(File f) throws InterruptedException {
+                  for (int i = 0; i < 30; i++) {
+                      long s1 = f.length();
+                      Thread.sleep(1000);
+                      long s2 = f.length();
+                      if (s1 > 0 && s1 == s2) return true;
+                  }
+                  return false;
+              }
+
+              private void processFile(File src, File dst) {
+                  for (int attempt = 1; attempt <= 3; attempt++) {
+                      try {
+                          updateNotif("Обработка: " + src.getName() + " (попытка " + attempt + ")");
+                          log("Отправка в ИИ: " + src.getName());
+
+                          String key = prefs.getString("api_key", "").trim();
+                          String model = prefs.getString("model_id", "google/gemini-nano-banana-2.1").trim();
+                          String prompt = prefs.getString("prompt", "Enhance this photo: improve sharpness, fine detail, lighting and color, reduce noise. Keep the composition, objects, faces and any text exactly the same.").trim();
+
+                          String b64 = prepareBase64(src);
+
+                          JSONObject imgObj = new JSONObject();
+                          imgObj.put("type", "base64");
+                          imgObj.put("data", "data:image/jpeg;base64," + b64);
+
+                          JSONArray images = new JSONArray();
+                          images.put(imgObj);
+
+                          JSONObject input = new JSONObject();
+                          input.put("prompt", prompt);
+                          input.put("output_format", "jpeg");
+                          input.put("images", images);
+
+                          JSONObject body = new JSONObject();
+                          body.put("model", model);
+                          body.put("input", input);
+
+                          JSONObject res = httpJson("POST", "https://polza.ai/api/v1/media", key, body.toString());
+                          String id = res.optString("id");
+
+                          for (int i = 0; i < 150; i++) {
+                              String st = res.optString("status");
+                              if ("completed".equals(st)) break;
+                              if ("failed".equals(st) || "cancelled".equals(st)) {
+                                  throw new RuntimeException("Ошибка ИИ: " + res.optString("error"));
+                              }
+                              Thread.sleep(2000);
+                              res = httpJson("GET", "https://polza.ai/api/v1/media/" + id, key, null);
+                          }
+
+                          if (!"completed".equals(res.optString("status"))) {
+                              throw new RuntimeException("Превышено время ожидания ответа от Polza");
+                          }
+
+                          Object dataObj = res.opt("data");
+                          if (dataObj instanceof JSONArray) {
+                              dataObj = ((JSONArray) dataObj).opt(0);
+                          }
+                          String url;
+                          if (dataObj instanceof JSONObject) {
+                              url = ((JSONObject) dataObj).optString("url");
+                          } else {
+                              url = String.valueOf(dataObj);
+                          }
+
+                          downloadFile(url, dst);
+                          MediaScannerConnection.scanFile(this, new String[]{dst.getAbsolutePath()}, new String[]{"image/jpeg"}, null);
+
+                          String cost = "";
+                          JSONObject usage = res.optJSONObject("usage");
+                          if (usage != null && usage.has("cost_rub")) {
+                              cost = " (" + usage.opt("cost_rub") + " ₽)";
+                          }
+                          log("✅ Готово: " + src.getName() + cost);
+                          updateNotif("Жду новые фото... (последнее: " + src.getName() + ")");
+                          return;
+                      } catch (Exception e) {
+                          log("⚠️ Сбой (" + attempt + "/3) " + src.getName() + ": " + e.getMessage());
+                          if (attempt == 3) {
+                              log("❌ Не удалось улучшить " + src.getName());
+                              updateNotif("Ошибка обработки " + src.getName());
+                          } else {
+                              try { Thread.sleep(5000); } catch (InterruptedException ignored) { return; }
+                          }
+                      }
+                  }
+              }
+
+              private String prepareBase64(File file) throws Exception {
+                  Bitmap bm = BitmapFactory.decodeFile(file.getAbsolutePath());
+                  if (bm == null) throw new RuntimeException("Не удалось прочитать фото");
+
+                  try {
+                      ExifInterface exif = new ExifInterface(file.getAbsolutePath());
+                      int ori = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+                      Matrix matrix = new Matrix();
+                      if (ori == ExifInterface.ORIENTATION_ROTATE_90) matrix.postRotate(90);
+                      else if (ori == ExifInterface.ORIENTATION_ROTATE_180) matrix.postRotate(180);
+                      else if (ori == ExifInterface.ORIENTATION_ROTATE_270) matrix.postRotate(270);
+                      bm = Bitmap.createBitmap(bm, 0, 0, bm.getWidth(), bm.getHeight(), matrix, true);
+                  } catch (Exception ignored) {}
+
+                  int w = bm.getWidth();
+                  int h = bm.getHeight();
+                  int max = 1536;
+                  if (w > max || h > max) {
+                      float ratio = Math.min((float) max / w, (float) max / h);
+                      bm = Bitmap.createScaledBitmap(bm, Math.round(w * ratio), Math.round(h * ratio), true);
+                  }
+
+                  ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                  bm.compress(Bitmap.CompressFormat.JPEG, 92, baos);
+                  return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+              }
+
+              private JSONObject httpJson(String method, String urlStr, String key, String jsonBody) throws Exception {
+                  HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                  conn.setRequestMethod(method);
+                  conn.setConnectTimeout(60000);
+                  conn.setReadTimeout(120000);
+                  conn.setRequestProperty("Authorization", "Bearer " + key);
+                  conn.setRequestProperty("Content-Type", "application/json");
+                  if (jsonBody != null) {
+                      conn.setDoOutput(true);
+                      try (OutputStream os = conn.getOutputStream()) {
+                          os.write(jsonBody.getBytes("UTF-8"));
+                      }
+                  }
+                  int code = conn.getResponseCode();
+                  InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+                  ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                  if (is != null) {
+                      byte[] buf = new byte[4096];
+                      int n;
+                      while ((n = is.read(buf)) != -1) baos.write(buf, 0, n);
+                  }
+                  String resp = baos.toString("UTF-8");
+                  if (code < 200 || code >= 300) {
+                      throw new RuntimeException("HTTP " + code + ": " + resp);
+                  }
+                  return new JSONObject(resp);
+              }
+
+              private void downloadFile(String urlStr, File dst) throws Exception {
+                  HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                  conn.setConnectTimeout(60000);
+                  conn.setReadTimeout(120000);
+                  try (InputStream is = conn.getInputStream(); FileOutputStream fos = new FileOutputStream(dst)) {
+                      byte[] buf = new byte[8192];
+                      int n;
+                      while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+                  }
+              }
+
+              private void log(String msg) {
+                  String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+                  String old = prefs.getString("logs", "");
+                  String[] lines = old.split("\n");
+                  StringBuilder sb = new StringBuilder();
+                  sb.append("[").append(time).append("] ").append(msg).append("\n");
+                  int count = Math.min(lines.length, 35);
+                  for (int i = 0; i < count; i++) {
+                      if (!lines[i].isEmpty()) sb.append(lines[i]).append("\n");
+                  }
+                  prefs.edit().putString("logs", sb.toString().trim()).apply();
+                  sendBroadcast(new Intent("POLZA_LOG_UPDATE").setPackage(getPackageName()));
+              }
+
+              private void createChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "AI Photo Enhancer", NotificationManager.IMPORTANCE_LOW);
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      if (nm != null) nm.createNotificationChannel(ch);
+                  }
+              }
+
+              private Notification buildNotif(String text) {
+                  Intent i = new Intent(this, MainActivity.class);
+                  PendingIntent pi = PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE);
+                  Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                      new Notification.Builder(this, CHANNEL_ID) : new Notification.Builder(this);
+                  return b.setContentTitle("AI Photo Enhancer")
+                      .setContentText(text)
+                      .setSmallIcon(android.R.drawable.ic_menu_camera)
+                      .setContentIntent(pi)
+                      .setOngoing(true)
+                      .build();
+              }
+
+              private void updateNotif(String text) {
+                  NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+                  if (nm != null) nm.notify(1, buildNotif(text));
+              }
+          }
+          EOF
+
+      - name: Install Gradle & Build APK
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
+      - name: Assemble Debug APK
+        run: gradle assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Photo-Enhancer-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
