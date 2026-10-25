@@ -96,7 +96,7 @@ jobs:
 
               <application
                   android:label="Photo Enhancer"
-                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  android:theme="@android:style/Theme.Material.NoActionBar">
 
                   <activity
                       android:name=".MainActivity"
@@ -121,12 +121,16 @@ jobs:
           import android.app.Activity
           import android.content.Intent
           import android.content.pm.PackageManager
+          import android.graphics.Color
           import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
           import android.net.Uri
           import android.os.Build
           import android.os.Bundle
           import android.provider.Settings
           import android.text.InputType
+          import android.view.Gravity
+          import android.view.ViewGroup
           import android.widget.Button
           import android.widget.EditText
           import android.widget.LinearLayout
@@ -135,12 +139,77 @@ jobs:
           import android.widget.Toast
 
           class MainActivity : Activity() {
+              private val cBg = Color.parseColor("#0E1116")
+              private val cCard = Color.parseColor("#181C23")
+              private val cInput = Color.parseColor("#232834")
+              private val cText = Color.parseColor("#ECEFF4")
+              private val cMuted = Color.parseColor("#8B93A1")
+              private val cAccent = Color.parseColor("#6C5CE7")
+              private val cDanger = Color.parseColor("#E5484D")
+              private val cGreen = Color.parseColor("#30C48D")
+              private val cSecondary = Color.parseColor("#2B3140")
+              private val match = ViewGroup.LayoutParams.MATCH_PARENT
+              private val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+
               private lateinit var keyField: EditText
               private lateinit var modelField: EditText
+              private lateinit var promptField: EditText
               private lateinit var toggle: Button
               private lateinit var status: TextView
               private lateinit var logView: TextView
               private var asked = false
+
+              private fun dp(v: Int): Int {
+                  return (v * resources.displayMetrics.density).toInt()
+              }
+
+              private fun bg(color: Int, radiusDp: Int): GradientDrawable {
+                  val g = GradientDrawable()
+                  g.setColor(color)
+                  g.cornerRadius = dp(radiusDp).toFloat()
+                  return g
+              }
+
+              private fun card(): LinearLayout {
+                  val c = LinearLayout(this)
+                  c.orientation = LinearLayout.VERTICAL
+                  c.background = bg(cCard, 16)
+                  c.setPadding(dp(16), dp(14), dp(16), dp(16))
+                  val lp = LinearLayout.LayoutParams(match, wrap)
+                  lp.topMargin = dp(12)
+                  c.layoutParams = lp
+                  return c
+              }
+
+              private fun label(text: String): TextView {
+                  val t = TextView(this)
+                  t.text = text
+                  t.setTextColor(cMuted)
+                  t.textSize = 12f
+                  t.setPadding(0, dp(8), 0, dp(2))
+                  return t
+              }
+
+              private fun styleInput(e: EditText) {
+                  e.setTextColor(cText)
+                  e.setHintTextColor(cMuted)
+                  e.textSize = 14f
+                  e.background = bg(cInput, 10)
+                  e.setPadding(dp(12), dp(10), dp(12), dp(10))
+                  val lp = LinearLayout.LayoutParams(match, wrap)
+                  lp.topMargin = dp(4)
+                  e.layoutParams = lp
+              }
+
+              private fun styleButton(b: Button, color: Int) {
+                  b.isAllCaps = false
+                  b.setTextColor(Color.WHITE)
+                  b.textSize = 15f
+                  b.background = bg(color, 12)
+                  val lp = LinearLayout.LayoutParams(match, dp(48))
+                  lp.topMargin = dp(10)
+                  b.layoutParams = lp
+              }
 
               private fun mediaPerm(): String {
                   return if (Build.VERSION.SDK_INT >= 33) {
@@ -161,40 +230,34 @@ jobs:
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
+                  window.statusBarColor = cBg
+                  window.navigationBarColor = cBg
                   val cfg = getSharedPreferences("cfg", MODE_PRIVATE)
-                  val pad = (16 * resources.displayMetrics.density).toInt()
 
                   val root = LinearLayout(this)
                   root.orientation = LinearLayout.VERTICAL
-                  root.setPadding(pad, pad, pad, pad)
+                  root.setPadding(dp(16), dp(20), dp(16), dp(28))
 
                   val title = TextView(this)
-                  title.text = "Автоулучшение фото"
-                  title.textSize = 22f
+                  title.text = "Photo Enhancer"
+                  title.setTextColor(cText)
+                  title.textSize = 26f
+                  title.typeface = Typeface.DEFAULT_BOLD
                   root.addView(title)
 
-                  keyField = EditText(this)
-                  keyField.hint = "API-ключ Polza (pza_...)"
-                  keyField.setText(cfg.getString("key", ""))
-                  keyField.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                  keyField.setSingleLine()
-                  root.addView(keyField)
+                  val sub = TextView(this)
+                  sub.text = "Автоулучшение новых фото через Polza.ai"
+                  sub.setTextColor(cMuted)
+                  sub.textSize = 13f
+                  root.addView(sub)
 
-                  modelField = EditText(this)
-                  modelField.hint = "ID модели"
-                  modelField.setText(cfg.getString("model", EnhancerService.DEFAULT_MODEL))
-                  modelField.setSingleLine()
-                  root.addView(modelField)
-
-                  val saveBtn = Button(this)
-                  saveBtn.text = "Сохранить настройки"
-                  saveBtn.setOnClickListener {
-                      saveCfg()
-                      Toast.makeText(this, "Сохранено", Toast.LENGTH_SHORT).show()
-                  }
-                  root.addView(saveBtn)
-
+                  val statusCard = card()
+                  status = TextView(this)
+                  status.textSize = 16f
+                  status.typeface = Typeface.DEFAULT_BOLD
+                  statusCard.addView(status)
                   toggle = Button(this)
+                  styleButton(toggle, cAccent)
                   toggle.setOnClickListener {
                       if (EnhancerService.running) {
                           stopService(Intent(this, EnhancerService::class.java))
@@ -203,9 +266,85 @@ jobs:
                           startEnhancer()
                       }
                   }
-                  root.addView(toggle)
+                  statusCard.addView(toggle)
+                  root.addView(statusCard)
+
+                  val connCard = card()
+                  connCard.addView(label("API-ключ Polza"))
+                  keyField = EditText(this)
+                  styleInput(keyField)
+                  keyField.hint = "pza_..."
+                  keyField.setText(cfg.getString("key", ""))
+                  keyField.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                  keyField.setSingleLine()
+                  connCard.addView(keyField)
+                  connCard.addView(label("ID модели"))
+                  modelField = EditText(this)
+                  styleInput(modelField)
+                  modelField.setText(cfg.getString("model", EnhancerService.DEFAULT_MODEL))
+                  modelField.setSingleLine()
+                  connCard.addView(modelField)
+                  root.addView(connCard)
+
+                  val promptCard = card()
+                  promptCard.addView(label("Промпт: что отправляется модели вместе с фото"))
+                  promptField = EditText(this)
+                  styleInput(promptField)
+                  promptField.setText(cfg.getString("prompt", EnhancerService.DEFAULT_PROMPT))
+                  promptField.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                  promptField.minLines = 5
+                  promptField.gravity = Gravity.TOP or Gravity.START
+                  promptCard.addView(promptField)
+
+                  val presets = listOf(
+                      Pair("По умолчанию", EnhancerService.DEFAULT_PROMPT),
+                      Pair(
+                          "Резче",
+                          "Strongly restore and sharpen this photo: increase fine texture detail, " +
+                              "remove noise and compression artifacts, improve clarity. Keep the " +
+                              "composition, objects, faces and any text exactly the same."
+                      ),
+                      Pair(
+                          "Цвета",
+                          "Enhance this photo with rich but natural colors, better contrast and " +
+                              "dynamic range, and clean sharp details. Keep the composition, " +
+                              "objects, faces and any text exactly the same."
+                      )
+                  )
+                  val presetRow = LinearLayout(this)
+                  presetRow.orientation = LinearLayout.HORIZONTAL
+                  val rowLp = LinearLayout.LayoutParams(match, wrap)
+                  rowLp.topMargin = dp(10)
+                  presetRow.layoutParams = rowLp
+                  for (p in presets) {
+                      val b = Button(this)
+                      b.text = p.first
+                      b.isAllCaps = false
+                      b.setTextColor(cText)
+                      b.textSize = 12f
+                      b.minimumWidth = 0
+                      b.minimumHeight = 0
+                      b.background = bg(cSecondary, 10)
+                      val lp = LinearLayout.LayoutParams(0, dp(40), 1f)
+                      lp.rightMargin = dp(6)
+                      b.layoutParams = lp
+                      b.setOnClickListener { promptField.setText(p.second) }
+                      presetRow.addView(b)
+                  }
+                  promptCard.addView(presetRow)
+                  root.addView(promptCard)
+
+                  val saveBtn = Button(this)
+                  styleButton(saveBtn, cSecondary)
+                  saveBtn.text = "Сохранить настройки"
+                  saveBtn.setOnClickListener {
+                      saveCfg()
+                      toast("Сохранено")
+                  }
+                  root.addView(saveBtn)
 
                   val battery = Button(this)
+                  styleButton(battery, cSecondary)
                   battery.text = "Настройки батареи приложения"
                   battery.setOnClickListener {
                       startActivity(
@@ -217,18 +356,19 @@ jobs:
                   }
                   root.addView(battery)
 
-                  status = TextView(this)
-                  status.textSize = 16f
-                  status.setPadding(0, pad, 0, pad / 2)
-                  root.addView(status)
-
+                  val logCard = card()
+                  logCard.addView(label("Журнал"))
                   logView = TextView(this)
+                  logView.setTextColor(cText)
                   logView.textSize = 12f
                   logView.typeface = Typeface.MONOSPACE
                   logView.setTextIsSelectable(true)
-                  root.addView(logView)
+                  logView.minLines = 4
+                  logCard.addView(logView)
+                  root.addView(logCard)
 
                   val scroll = ScrollView(this)
+                  scroll.setBackgroundColor(cBg)
                   scroll.fitsSystemWindows = true
                   scroll.addView(root)
                   setContentView(scroll)
@@ -238,6 +378,7 @@ jobs:
                   getSharedPreferences("cfg", MODE_PRIVATE).edit()
                       .putString("key", keyField.text.toString().trim())
                       .putString("model", modelField.text.toString().trim())
+                      .putString("prompt", promptField.text.toString().trim())
                       .apply()
               }
 
@@ -248,7 +389,7 @@ jobs:
               private fun startEnhancer() {
                   saveCfg()
                   if (keyField.text.toString().isBlank()) {
-                      toast("Сначала введи API-ключ и нажми «Сохранить настройки»")
+                      toast("Сначала введи API-ключ")
                       return
                   }
                   val missing = needed().filter {
@@ -279,7 +420,9 @@ jobs:
               private fun refresh() {
                   val on = EnhancerService.running
                   toggle.text = if (on) "Выключить автоулучшение" else "Включить автоулучшение"
-                  status.text = if (on) "Работает: слежу за папкой DCIM/Camera" else "Выключено"
+                  toggle.background = bg(if (on) cDanger else cAccent, 12)
+                  status.text = if (on) "●  Работает: слежу за DCIM/Camera" else "●  Выключено"
+                  status.setTextColor(if (on) cGreen else cMuted)
               }
 
               private fun refreshSoon() {
@@ -297,6 +440,7 @@ jobs:
 
               override fun onPause() {
                   super.onPause()
+                  saveCfg()
                   AppLog.listener = null
               }
           }
@@ -367,7 +511,7 @@ jobs:
                   var running = false
                   const val DEFAULT_MODEL = "google/gemini-nano-banana-2.1"
                   const val API = "https://polza.ai/api/v1"
-                  const val PROMPT = "Enhance this photo: improve sharpness, fine detail, lighting " +
+                  const val DEFAULT_PROMPT = "Enhance this photo: improve sharpness, fine detail, lighting " +
                       "and color, reduce noise. Keep the composition, objects, faces " +
                       "and any text exactly the same."
                   val IMG: Uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -518,10 +662,12 @@ jobs:
                   val key = (c.getString("key", "") ?: "").trim()
                   var model = (c.getString("model", DEFAULT_MODEL) ?: "").trim()
                   if (model.isEmpty()) model = DEFAULT_MODEL
+                  var prompt = (c.getString("prompt", DEFAULT_PROMPT) ?: "").trim()
+                  if (prompt.isEmpty()) prompt = DEFAULT_PROMPT
 
                   val b64 = Base64.encodeToString(loadScaled(uri, 1536), Base64.NO_WRAP)
                   val input = JSONObject()
-                      .put("prompt", PROMPT)
+                      .put("prompt", prompt)
                       .put("output_format", "jpeg")
                       .put(
                           "images",
